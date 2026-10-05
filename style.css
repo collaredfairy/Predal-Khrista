@@ -1,0 +1,10 @@
+.bible-oracle-settings .bible-oracle-muted,.bible-oracle-muted{opacity:.7;font-size:.9em;margin:.4em 0}
+.bible-oracle-setting-row{display:flex;gap:.5em;margin:.5em 0}
+.bible-oracle-popup{position:fixed;z-index:99999;top:8vh;right:4vw;width:min(720px,92vw);max-height:84vh;display:flex;flex-direction:column;background:var(--SmartThemeBlurTintColor,#202020);color:var(--SmartThemeBodyColor,#ddd);border:1px solid var(--SmartThemeBorderColor,#555);border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden}
+.bible-oracle-header{display:flex;justify-content:space-between;align-items:center;padding:.7em 1em;border-bottom:1px solid var(--SmartThemeBorderColor,#555);font-size:1.05em}
+.bible-oracle-tabs{display:flex;gap:.35em;padding:.5em;border-bottom:1px solid var(--SmartThemeBorderColor,#555)}
+.bo-tab{flex:1;padding:.45em;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}.bo-tab.active{background:var(--SmartThemeQuoteColor,#555)}
+.bo-page{padding:.75em;overflow:auto;min-height:0}
+.bible-oracle-search{display:flex;gap:.4em;margin-bottom:.7em}.bible-oracle-search .text_pole{flex:1}
+.bible-oracle-themes{display:flex;flex-wrap:wrap;gap:.3em;margin-bottom:.8em}.bo-theme{font-size:.82em;padding:.25em .5em;border:1px solid var(--SmartThemeBorderColor,#555);border-radius:999px;background:transparent;color:inherit;cursor:pointer}.bo-theme.selected{background:var(--SmartThemeQuoteColor,#555)}
+.bible-oracle-result{padding:.75em 0;border-top:1px solid var(--SmartThemeBorderColor,#444)}.bible-oracle-result:first-child{border-top:0}.bible-oracle-ref{font-weight:700;margin-bottom:.25em}.bible-oracle-text{line-height:1.45}.bible-oracle-reason{margin-top:.4em;font-size:.88em;opacity:.72;font-style:italic}.bible-oracle-actions{display:flex;gap:.35em;margin-top:.5em}.bible-oracle-empty{opacity:.65;padding:1em 0}.bible-oracle-footer{display:flex;justify-content:space-between;align-items:center;gap:.5em;padding:.55em .75em;border-top:1px solid var(--SmartThemeBorderColor,#555);font-size:.85em}.bo-import{cursor:pointer}
