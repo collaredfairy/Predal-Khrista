@@ -17,3 +17,13 @@ Bible text is loaded from a public-domain KJV JSON corpus. The model is only ask
 ## Semantic search
 
 Catalogue search now has two modes. Word Search performs exact/local lexical retrieval. Semantic Search uses the active SillyTavern model to expand the request into concepts and then rerank retrieved passages by meaning, while all displayed Scripture still comes verbatim from the verified local KJV corpus.
+
+
+### v0.5.2
+- Current Scene now has an exact numeric Context depth setting, persisted in extension settings.
+- Added a persistent floating 📖 button for opening Bible Oracle from anywhere in the UI.
+
+
+## v0.5.2
+- Floating Oracle button can be dragged and its position is saved.
+- Oracle window state persists across closing/reopening: active tab, search query, selected theme, and retrieved Catalogue/Current Scene results.

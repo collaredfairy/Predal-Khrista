@@ -1,5 +1,5 @@
 const MODULE = 'bible-oracle';
-const VERSION = '0.5.0';
+const VERSION = '0.5.2';
 const KJV_SOURCES = [
   'https://cdn.jsdelivr.net/gh/churchstudio-org/openbible@main/KJV/bible.json',
   'https://raw.githubusercontent.com/churchstudio-org/openbible/main/KJV/bible.json',
@@ -68,18 +68,37 @@ const THEME_TERMS = {
   Life:['life','living','live','liveth']
 };
 
-const state = { corpus:null, verses:[], favorites:[], theme:'Sin', lastResults:[] };
+const state = { corpus:null, verses:[], favorites:[], theme:'Sin', lastResults:[], catalogueResults:[], sceneResults:[], activeTab:'catalogue', searchQuery:'', floatingPosition:null };
 
 function ctx(){ return window.SillyTavern?.getContext?.() || {}; }
 function settings(){
   const c=ctx();
   c.extensionSettings ||= {};
-  c.extensionSettings[MODULE] ||= {favorites:[]};
+  c.extensionSettings[MODULE] ||= {favorites:[], sceneDepth:24, oracleState:{}};
   c.extensionSettings[MODULE].favorites ||= [];
+  c.extensionSettings[MODULE].oracleState ||= {};
+  if(!Number.isFinite(Number(c.extensionSettings[MODULE].sceneDepth)) || Number(c.extensionSettings[MODULE].sceneDepth) < 1) c.extensionSettings[MODULE].sceneDepth=24;
   state.favorites=c.extensionSettings[MODULE].favorites;
   return c.extensionSettings[MODULE];
 }
+function hydrateOracleState(){
+  const s=settings();
+  const os=s.oracleState||{};
+  if(Array.isArray(os.catalogueResults)) state.catalogueResults=os.catalogueResults;
+  if(Array.isArray(os.sceneResults)) state.sceneResults=os.sceneResults;
+  if(typeof os.searchQuery==='string') state.searchQuery=os.searchQuery;
+  if(['catalogue','scene','favorites'].includes(os.activeTab)) state.activeTab=os.activeTab;
+  if(os.floatingPosition && Number.isFinite(Number(os.floatingPosition.left)) && Number.isFinite(Number(os.floatingPosition.top))) state.floatingPosition={left:Number(os.floatingPosition.left),top:Number(os.floatingPosition.top)};
+  if(typeof os.theme==='string' && THEMES.includes(os.theme)) state.theme=os.theme;
+}
 function save(){ ctx().saveSettingsDebounced?.(); }
+function saveOracleState(){
+  const c=ctx();
+  c.extensionSettings ||= {};
+  c.extensionSettings[MODULE] ||= {favorites:[], sceneDepth:24, oracleState:{}};
+  c.extensionSettings[MODULE].oracleState={activeTab:state.activeTab,searchQuery:state.searchQuery,theme:state.theme,catalogueResults:state.catalogueResults,sceneResults:state.sceneResults,floatingPosition:state.floatingPosition};
+  save();
+}
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function normalize(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9'\s-]/g,' '); }
 
@@ -184,7 +203,8 @@ async function semanticSearch(query, limit=12){
 function recentChat(){
   const c=ctx();
   const chat=Array.isArray(c.chat)?c.chat:[];
-  return chat.slice(-24).map(m=>`${m.name||m.role||'Speaker'}: ${m.mes||m.content||''}`).join('\n').slice(-18000);
+  const depth=Math.max(1,Math.min(10000,Math.floor(Number(settings().sceneDepth)||24)));
+  return chat.slice(-depth).map(m=>`${m.name||m.role||'Speaker'}: ${m.mes||m.content||''}`).join('\n').slice(-18000);
 }
 function lexicalSceneCandidates(chat,limit=40){
   const words=[...new Set(normalize(chat).split(/\s+/).filter(w=>w.length>=4 && !/^(that|this|with|have|from|they|them|were|your|what|when|then|just|into|there|their|about|would|could|should|said|like|very|been|will|shall|upon|only|some|more|than|were|here|over|under|after|before)$/.test(w)))];
@@ -210,7 +230,14 @@ function resultCard(item,idx){
   return `<div class="bible-oracle-result" data-id="${esc(v.id)}"><div class="bible-oracle-ref">${esc(v.book)} ${v.chapter}:${v.verse}</div><div class="bible-oracle-text">${esc(v.text)}</div>${reason?`<div class="bible-oracle-reason">${esc(reason)}</div>`:''}<div class="bible-oracle-actions"><button class="menu_button bo-copy" data-id="${esc(v.id)}">Copy</button><button class="menu_button bo-fav" data-id="${esc(v.id)}">${fav?'★ Saved':'☆ Save'}</button></div></div>`;
 }
 function findVerse(id){return state.verses.find(v=>v.id===id);}
-function renderResults(items,target){ state.lastResults=items; $(target).html(items.length?items.map(resultCard).join(''):'<div class="bible-oracle-empty">No passages found.</div>'); bindResultButtons(target); }
+function renderResults(items,target){
+  state.lastResults=items||[];
+  if(target==='#bo_catalogue_results') state.catalogueResults=state.lastResults;
+  if(target==='#bo_scene_results') state.sceneResults=state.lastResults;
+  $(target).html(state.lastResults.length?state.lastResults.map(resultCard).join(''):'<div class="bible-oracle-empty">No passages found.</div>');
+  bindResultButtons(target);
+  saveOracleState();
+}
 function bindResultButtons(target){
   $(target).off('click.bo','.bo-copy').on('click.bo','.bo-copy',async function(){ const v=findVerse($(this).data('id')); if(!v)return; await navigator.clipboard?.writeText(`${v.book} ${v.chapter}:${v.verse} — ${v.text}`); toastr.success('Passage copied.','Bible Oracle'); });
   $(target).off('click.bo','.bo-fav').on('click.bo','.bo-fav',function(){ const id=$(this).data('id'); const s=settings(); s.favorites ||= []; s.favorites=s.favorites.includes(id)?s.favorites.filter(x=>x!==id):[...s.favorites,id]; state.favorites=s.favorites; save(); renderResults(state.lastResults,target); });
@@ -218,17 +245,33 @@ function bindResultButtons(target){
 
 function buildPanel(){
   $('#bible_oracle_popup').remove();
-  const html=`<div id="bible_oracle_popup" class="bible-oracle-popup"><div class="bible-oracle-header"><b>📖 Bible Oracle</b><button id="bo_close" class="menu_button">×</button></div><div class="bible-oracle-tabs"><button data-tab="catalogue" class="bo-tab active">Catalogue</button><button data-tab="scene" class="bo-tab">Current Scene</button><button data-tab="favorites" class="bo-tab">Favorites</button></div><div id="bo_catalogue" class="bo-page"><div class="bible-oracle-search"><input id="bo_search" class="text_pole" placeholder="Search the KJV..."/><button id="bo_search_btn" class="menu_button">Word Search</button><button id="bo_semantic_btn" class="menu_button">Semantic Search</button></div><div id="bo_themes" class="bible-oracle-themes">${THEMES.map(t=>`<button class="bo-theme ${t===state.theme?'selected':''}" data-theme="${esc(t)}">${esc(t)}</button>`).join('')}</div><div id="bo_catalogue_results"></div></div><div id="bo_scene" class="bo-page" style="display:none"><p class="bible-oracle-muted">Reads the recent RP chat, retrieves real KJV candidates locally, then optionally asks the current ST model to rank only those candidates.</p><button id="bo_analyze" class="menu_button">Analyze Current Scene</button><div id="bo_scene_results"></div></div><div id="bo_favorites" class="bo-page" style="display:none"><div id="bo_fav_results"></div></div><div class="bible-oracle-footer"><span id="bo_status">Loading KJV…</span><label class="menu_button bo-import">Import KJV JSON<input id="bo_import" type="file" accept="application/json,.json" hidden></label></div></div>`;
+  const s=settings();
+  const html=`<div id="bible_oracle_popup" class="bible-oracle-popup"><div class="bible-oracle-header"><b>📖 Bible Oracle</b><button id="bo_close" class="menu_button">×</button></div><div class="bible-oracle-tabs"><button data-tab="catalogue" class="bo-tab">Catalogue</button><button data-tab="scene" class="bo-tab">Current Scene</button><button data-tab="favorites" class="bo-tab">Favorites</button></div><div id="bo_catalogue" class="bo-page"><div class="bible-oracle-search"><input id="bo_search" class="text_pole" placeholder="Search the KJV..." value="${esc(state.searchQuery)}"/><button id="bo_search_btn" class="menu_button">Word Search</button><button id="bo_semantic_btn" class="menu_button">Semantic Search</button></div><div id="bo_themes" class="bible-oracle-themes">${THEMES.map(t=>`<button class="bo-theme ${t===state.theme?'selected':''}" data-theme="${esc(t)}">${esc(t)}</button>`).join('')}</div><div id="bo_catalogue_results"></div></div><div id="bo_scene" class="bo-page" style="display:none"><p class="bible-oracle-muted">Reads the recent RP chat, retrieves real KJV candidates locally, then asks the current ST model to rank only those candidates.</p><div class="bible-oracle-depth-row"><label for="bo_scene_depth">Context depth</label><input id="bo_scene_depth" class="text_pole bo-scene-depth" type="number" min="1" max="10000" step="1" value="${esc(s.sceneDepth)}"><span class="bible-oracle-muted">messages</span></div><button id="bo_analyze" class="menu_button">Analyze Current Scene</button><div id="bo_scene_results"></div></div><div id="bo_favorites" class="bo-page" style="display:none"><div id="bo_fav_results"></div></div><div class="bible-oracle-footer"><span id="bo_status">Loading KJV…</span><label class="menu_button bo-import">Import KJV JSON<input id="bo_import" type="file" accept="application/json,.json" hidden></label></div></div>`;
   $('body').append(html);
+
+  const activateTab=(tab,saveState=true)=>{
+    state.activeTab=['catalogue','scene','favorites'].includes(tab)?tab:'catalogue';
+    $('.bo-tab').removeClass('active'); $(`.bo-tab[data-tab="${state.activeTab}"]`).addClass('active');
+    $('.bo-page').hide(); $(`#bo_${state.activeTab}`).show();
+    if(state.activeTab==='favorites') renderFavorites();
+    if(saveState) saveOracleState();
+  };
+
   $('#bo_close').on('click',()=>$('#bible_oracle_popup').remove());
-  $('.bo-tab').on('click',function(){ const tab=$(this).data('tab'); $('.bo-tab').removeClass('active');$(this).addClass('active');$('.bo-page').hide();$(`#bo_${tab}`).show();if(tab==='favorites')renderFavorites(); });
-  $('.bo-theme').on('click',async function(){ state.theme=$(this).data('theme');$('.bo-theme').removeClass('selected');$(this).addClass('selected');if(await loadCorpus())renderResults(themeSearch(state.theme), '#bo_catalogue_results'); });
-  $('#bo_search_btn').on('click',async()=>{if(await loadCorpus())renderResults(literalSearch($('#bo_search').val()),'#bo_catalogue_results');});
+  $('.bo-tab').on('click',function(){ activateTab($(this).data('tab')); });
+  $('.bo-theme').on('click',async function(){ state.theme=$(this).data('theme'); $('.bo-theme').removeClass('selected'); $(this).addClass('selected'); saveOracleState(); if(await loadCorpus()) renderResults(themeSearch(state.theme),'#bo_catalogue_results'); });
+  $('#bo_search').on('input',function(){ state.searchQuery=this.value; saveOracleState(); });
+  $('#bo_search_btn').on('click',async()=>{ state.searchQuery=$('#bo_search').val(); saveOracleState(); if(await loadCorpus()) renderResults(literalSearch(state.searchQuery),'#bo_catalogue_results'); });
   $('#bo_search').on('keydown',e=>{if(e.key==='Enter')$('#bo_search_btn').click();});
-  $('#bo_semantic_btn').on('click',async()=>{const q=$('#bo_search').val();if(!q)return;if(await loadCorpus()){ $('#bo_catalogue_results').html('<div class=\"bible-oracle-muted\">Interpreting the search and ranking relevant passages…</div>'); const r=await semanticSearch(q,12); renderResults(r,'#bo_catalogue_results'); }});
+  $('#bo_semantic_btn').on('click',async()=>{ const q=$('#bo_search').val(); state.searchQuery=q; saveOracleState(); if(!q)return; if(await loadCorpus()){ $('#bo_catalogue_results').html('<div class="bible-oracle-muted">Interpreting the search and ranking relevant passages…</div>'); const r=await semanticSearch(q,12); renderResults(r,'#bo_catalogue_results'); }});
+  $('#bo_scene_depth').on('change input',function(){ const n=Math.max(1,Math.min(10000,Math.floor(Number(this.value)||24))); this.value=n; const st=settings(); st.sceneDepth=n; save(); });
   $('#bo_analyze').on('click',analyzeScene);
   $('#bo_import').on('change',async function(){try{const f=this.files?.[0];if(!f)return;const raw=JSON.parse(await f.text());const verses=flattenCorpus(raw);if(!verses.length)throw new Error('Unrecognized structure');state.verses=verses;state.corpus='imported';await window.SillyTavern?.libs?.localforage?.setItem?.(`${MODULE}_corpus`,verses);$('#bo_status').text(`Loaded ${verses.length.toLocaleString()} verses`);renderResults(themeSearch(state.theme),'#bo_catalogue_results');toastr.success('KJV corpus imported.','Bible Oracle');}catch(e){console.error(e);toastr.error('That JSON was not recognized as a Bible corpus.','Bible Oracle');}});
-  loadCorpus().then(ok=>{ $('#bo_status').text(ok?`Loaded ${state.verses.length.toLocaleString()} verses`:'KJV not loaded'); if(ok)renderResults(themeSearch(state.theme),'#bo_catalogue_results'); });
+
+  if(state.catalogueResults.length) renderResults(state.catalogueResults,'#bo_catalogue_results');
+  if(state.sceneResults.length) renderResults(state.sceneResults,'#bo_scene_results');
+  activateTab(state.activeTab,false);
+  loadCorpus().then(ok=>{ $('#bo_status').text(ok?`Loaded ${state.verses.length.toLocaleString()} verses`:'KJV not loaded'); if(!state.catalogueResults.length && ok) renderResults(themeSearch(state.theme),'#bo_catalogue_results'); });
 }
 async function analyzeScene(){
   const out='#bo_scene_results'; $(out).html('<div class="bible-oracle-muted">Reading the scene and retrieving candidates…</div>');
@@ -247,7 +290,44 @@ function renderFavorites(){
 
 function init(){
   settings();
+  hydrateOracleState();
   $('#bible_oracle_open').off('click.bo').on('click.bo',buildPanel);
+  if(!$('#bible_oracle_floating').length){
+    $('body').append('<button id="bible_oracle_floating" class="bible-oracle-floating" title="Open Bible Oracle" aria-label="Open Bible Oracle">📖</button>');
+  }
+  const floating=$('#bible_oracle_floating');
+  if(state.floatingPosition){ floating.css({left:`${state.floatingPosition.left}px`,top:`${state.floatingPosition.top}px`,right:'auto',bottom:'auto'}); }
+  floating.off('.boDrag');
+  let drag=null;
+  floating.on('pointerdown.boDrag',function(e){
+    if(e.button!==0)return;
+    const r=this.getBoundingClientRect();
+    drag={startX:e.clientX,startY:e.clientY,left:r.left,top:r.top,moved:false};
+    this.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  }).on('pointermove.boDrag',function(e){
+    if(!drag)return;
+    const dx=e.clientX-drag.startX, dy=e.clientY-drag.startY;
+    if(Math.hypot(dx,dy)>4)drag.moved=true;
+    if(!drag.moved)return;
+    const size=this.getBoundingClientRect();
+    const left=Math.max(0,Math.min(window.innerWidth-size.width,drag.left+dx));
+    const top=Math.max(0,Math.min(window.innerHeight-size.height,drag.top+dy));
+    $(this).css({left:`${left}px`,top:`${top}px`,right:'auto',bottom:'auto'});
+  }).on('pointerup.boDrag pointercancel.boDrag',function(){
+    if(!drag)return;
+    if(drag.moved){
+      const r=this.getBoundingClientRect();
+      state.floatingPosition={left:Math.round(r.left),top:Math.round(r.top)};
+      saveOracleState();
+      this.dataset.boDragged='1';
+      setTimeout(()=>delete this.dataset.boDragged,0);
+    }
+    drag=null;
+  }).on('click.boDrag',function(e){
+    if(this.dataset.boDragged==='1'){e.preventDefault();e.stopImmediatePropagation();return;}
+    buildPanel();
+  });
   if(!$('#bible_oracle_open').length) console.warn('[Bible Oracle] settings UI not found');
   console.log(`[Bible Oracle] ${VERSION} loaded`);
 }
